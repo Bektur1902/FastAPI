@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, BackgroundTasks, HTTPException
+from slugify import slugify
 from typing import List
 from sqladmin import Admin
 
@@ -45,7 +46,12 @@ async def post_details(slug, db: Session = Depends(get_db)):
 async def create_post(data: CreatePostSchema,
                       db: Session = Depends(get_db),
                       user: User = Depends(get_request_user)):
-    pass
+    slug = slugify(data.title)
+    post = Post(author_id=user.id, slug=slug, **data.dict())
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    return post
 
 
 @app.patch('/posts/{slug}/', response_model=PostSchema)
@@ -53,14 +59,33 @@ async def update_post(slug: str,
                       data: UpdatePostSchema,
                       db: Session = Depends(get_db),
                       user: User = Depends(get_request_user)):
-    pass
+
+    post = db.query(Post).filter(Post.slug == slug).first()
+    if post is None:
+        raise HTTPException(status_code=404,
+                            detail='Пост не найден')
+    if post.author != user:
+        raise HTTPException(status_code=403,
+                            detail='Вы не являетесь автором')
+    for key, value in data.dict().items():
+        setattr(post, key, value)
+    return post
 
 
 @app.delete('/posts/{slug}/')
 async def delete_post(slug: str,
                       db: Session = Depends(get_db),
                       user: User = Depends(get_request_user)):
-    pass
+    post = db.query(Post).filter(Post.slug == slug).first()
+    if post is None:
+        raise HTTPException(status_code=404,
+                            detail='Пост не найден')
+    if post.author != user:
+        raise HTTPException(status_code=403,
+                            detail='Вы не являетесь автором')
+    db.delete(post)
+    db.commit()
+    return 'Пост удалён'
 
 
 @app.post('/register/')
@@ -112,8 +137,8 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400,
                             detail='Аккаунт не активен')
     return {
-        'access_token': create_access_token(user.id),
-        'refresh_token': create_refresh_token(user.id)
+        'access_token': create_access_token(str(user.id)),
+        'refresh_token': create_refresh_token(str(user.id))
     }
 
 #TODO: закончить авторизацию (логин, смена пароля и т.д.)
@@ -122,6 +147,7 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
 #TODO: CRUD
 #TODO: Docker
 #TODO: деплой
+
 
 admin.register_model(CategoryAdmin)
 admin.register_model(PostAdmin)
